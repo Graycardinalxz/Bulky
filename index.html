@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulky - AI-Powered Email Outreach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      * { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+const { useState } = React;
+
+const Bulky = () => {
+  const [darkMode, setDarkMode] = useState(true);
+  const [activeTab, setActiveTab] = useState('single');
+  const [step, setStep] = useState('input');
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    yourName: '',
+    yourCompany: '',
+    yourProduct: '',
+    targetRole: '',
+    targetCompany: '',
+    painPoint: '',
+    tone: 'professional'
+  });
+  const [generatedEmails, setGeneratedEmails] = useState([]);
+  const [copied, setCopied] = useState(null);
+  const [activeEmail, setActiveEmail] = useState(0);
+  const [csvData, setCsvData] = useState([]);
+  const [bulkEmails, setBulkEmails] = useState([]);
+  const [bulkStep, setBulkStep] = useState('upload');
+  const [sendingProgress, setSendingProgress] = useState(0);
+
+  const tones = [
+    { id: 'professional', label: 'Professional', icon: '💼' },
+    { id: 'friendly', label: 'Friendly', icon: '😊' },
+    { id: 'bold', label: 'Bold', icon: '🔥' },
+    { id: 'curious', label: 'Curious', icon: '🧠' }
+  ];
+
+  const theme = {
+    bg: darkMode ? 'bg-[#0a0a0a]' : 'bg-slate-50',
+    card: darkMode ? 'bg-white/[0.03] border-white/10' : 'bg-white border-slate-200 shadow-sm',
+    text: darkMode ? 'text-white' : 'text-slate-900',
+    textMuted: darkMode ? 'text-white/40' : 'text-slate-500',
+    textLight: darkMode ? 'text-white/70' : 'text-slate-600',
+    input: darkMode ? 'bg-white/5 border-white/10 text-white placeholder-white/25' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400',
+    inputFocus: darkMode ? 'focus:border-orange-500/50 focus:bg-white/[0.07]' : 'focus:border-orange-500 focus:bg-white',
+    buttonSecondary: darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700',
+  };
+
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const generateEmails = async () => {
+    setLoading(true);
+    setStep('generating');
+    
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1500,
+          messages: [{
+            role: 'user',
+            content: `You are an expert cold email copywriter. Generate 3 different cold email variations.
+
+SENDER: ${formData.yourName} from ${formData.yourCompany}
+PRODUCT: ${formData.yourProduct}
+TARGET: ${formData.targetRole} at ${formData.targetCompany || 'their company'}
+PAIN POINT: ${formData.painPoint}
+TONE: ${formData.tone}
+
+Generate 3 styles:
+1. "Direct" - Straight to point
+2. "Curious" - Intriguing question  
+3. "Value" - Lead with insight
+
+Return ONLY valid JSON:
+{"emails":[{"style":"Direct","subject":"...","body":"..."},{"style":"Curious","subject":"...","body":"..."},{"style":"Value","subject":"...","body":"..."}]}`
+          }]
+        })
+      });
+      const data = await response.json();
+      const parsed = JSON.parse(data.content[0].text);
+      setGeneratedEmails(parsed.emails);
+    } catch (error) {
+      const company = formData.targetCompany || 'your company';
+      setGeneratedEmails([
+        { style: 'Direct', subject: `Quick question about ${formData.painPoint}`, body: `Hi there,\n\nI'm ${formData.yourName} from ${formData.yourCompany}. We help ${formData.targetRole}s solve ${formData.painPoint} with ${formData.yourProduct}.\n\nWould you be open to a 15-minute call this week?\n\nBest,\n${formData.yourName}` },
+        { style: 'Curious', subject: `How are you handling ${formData.painPoint}?`, body: `Hey!\n\nQuick question - how is ${company} currently dealing with ${formData.painPoint}?\n\nWe just helped a similar company cut their time on this by 40%.\n\nCurious if worth a chat?\n\n${formData.yourName}` },
+        { style: 'Value', subject: `Idea for ${company}`, body: `Hi,\n\nI noticed ${company} is growing fast - congrats!\n\nHad a thought about ${formData.painPoint} that helped our clients see quick wins.\n\nWorth 10 minutes?\n\n${formData.yourName}\n${formData.yourCompany}` }
+      ]);
+    }
+    setStep('results');
+    setLoading(false);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const lines = text.split('\n').filter(line => line.trim());
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      
+      const data = lines.slice(1).map(line => {
+        const values = line.split(',').map(v => v.trim());
+        const obj = {};
+        headers.forEach((header, idx) => {
+          obj[header] = values[idx] || '';
+        });
+        return obj;
+      });
+      
+      setCsvData(data);
+      setBulkStep('preview');
+    };
+    reader.readAsText(file);
+  };
+
+  const generateBulkEmails = async () => {
+    setBulkStep('generating');
+    const emails = [];
+    
+    for (let i = 0; i < csvData.length; i++) {
+      const contact = csvData[i];
+      setSendingProgress(Math.round((i / csvData.length) * 100));
+      await new Promise(r => setTimeout(r, 400));
+      
+      emails.push({
+        to: contact.email,
+        name: contact.name,
+        company: contact.company,
+        subject: `Quick question for ${contact.name}`,
+        body: `Hi ${contact.name},\n\nI noticed ${contact.company} is doing great work. I'm ${formData.yourName} from ${formData.yourCompany}.\n\nWe help companies like yours with ${formData.yourProduct}.\n\nWould you be open to a quick chat?\n\nBest,\n${formData.yourName}`,
+        status: 'ready'
+      });
+    }
+    
+    setBulkEmails(emails);
+    setBulkStep('ready');
+    setSendingProgress(0);
+  };
+
+  const sendAllEmails = async () => {
+    setBulkStep('sending');
+    
+    for (let i = 0; i < bulkEmails.length; i++) {
+      await new Promise(r => setTimeout(r, 600));
+      setSendingProgress(Math.round(((i + 1) / bulkEmails.length) * 100));
+      setBulkEmails(prev => prev.map((email, idx) => 
+        idx === i ? { ...email, status: 'sent' } : email
+      ));
+    }
+    setBulkStep('done');
+  };
+
+  const copyToClipboard = (text, id) => {
+    navigator.clipboard.writeText(text);
+    setCopied(id);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const isFormValid = formData.yourName && formData.yourCompany && formData.yourProduct && formData.targetRole && formData.painPoint;
+
+  return (
+    <div className={`min-h-screen ${theme.bg} ${theme.text} transition-colors duration-300`}>
+      {darkMode && (
+        <div className="fixed inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-orange-500/10 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-amber-500/10 rounded-full blur-3xl"></div>
+        </div>
+      )}
+
+      {/* Header */}
+      <header className={`relative z-10 border-b ${darkMode ? 'border-white/5' : 'border-slate-200'}`}>
+        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-lg shadow-orange-500/30">
+              <span className="text-xl font-black text-white">B</span>
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold tracking-tight">Bulky</h1>
+              <p className={`text-[10px] ${theme.textMuted}`}>AI Email Outreach</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setDarkMode(!darkMode)}
+              className={`p-2.5 rounded-xl transition-all ${theme.buttonSecondary}`}
+            >
+              {darkMode ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              )}
+            </button>
+            
+            <button className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 transition-all">
+              Upgrade $49/mo
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div className="relative z-10 max-w-5xl mx-auto px-6 pt-6">
+        <div className={`inline-flex p-1 rounded-xl ${darkMode ? 'bg-white/5' : 'bg-slate-100'}`}>
+          <button
+            onClick={() => { setActiveTab('single'); setStep('input'); }}
+            className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'single' 
+                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-lg' 
+                : theme.textMuted + ' hover:text-white/60'
+            }`}
+          >
+            ✉️ Single Email
+          </button>
+          <button
+            onClick={() => { setActiveTab('bulk'); setBulkStep('upload'); }}
+            className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'bulk' 
+                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-lg' 
+                : theme.textMuted + ' hover:text-white/60'
+            }`}
+          >
+            📊 Bulk Send
+          </button>
+        </div>
+      </div>
+
+      <main className="relative z-10 max-w-5xl mx-auto px-6 py-8">
+        
+        {/* SINGLE EMAIL */}
+        {activeTab === 'single' && (
+          <>
+            {step === 'input' && (
+              <div className="space-y-8">
+                <div className="text-center space-y-3">
+                  <h2 className="text-3xl md:text-4xl font-extrabold">Cold emails that <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-amber-500">convert</span></h2>
+                  <p className={theme.textMuted}>AI writes personalized emails. You close deals.</p>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-5">
+                  <div className={`border rounded-2xl p-5 space-y-4 ${theme.card}`}>
+                    <div className={`flex items-center gap-2 text-sm font-semibold ${theme.textMuted}`}>
+                      <span className="w-6 h-6 rounded-lg bg-orange-500/20 text-orange-400 flex items-center justify-center text-xs font-bold">1</span>
+                      About You
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>Your Name</label>
+                      <input type="text" value={formData.yourName} onChange={(e) => handleInputChange('yourName', e.target.value)} placeholder="John Smith" className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all text-sm ${theme.input} ${theme.inputFocus}`} />
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>Company</label>
+                      <input type="text" value={formData.yourCompany} onChange={(e) => handleInputChange('yourCompany', e.target.value)} placeholder="Acme Inc" className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all text-sm ${theme.input} ${theme.inputFocus}`} />
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>What you're selling</label>
+                      <textarea value={formData.yourProduct} onChange={(e) => handleInputChange('yourProduct', e.target.value)} placeholder="AI tool that automates..." rows={2} className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all resize-none text-sm ${theme.input} ${theme.inputFocus}`} />
+                    </div>
+                  </div>
+
+                  <div className={`border rounded-2xl p-5 space-y-4 ${theme.card}`}>
+                    <div className={`flex items-center gap-2 text-sm font-semibold ${theme.textMuted}`}>
+                      <span className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs font-bold">2</span>
+                      Your Target
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>Role</label>
+                        <input type="text" value={formData.targetRole} onChange={(e) => handleInputChange('targetRole', e.target.value)} placeholder="VP of Sales" className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all text-sm ${theme.input} ${theme.inputFocus}`} />
+                      </div>
+                      <div>
+                        <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>Company</label>
+                        <input type="text" value={formData.targetCompany} onChange={(e) => handleInputChange('targetCompany', e.target.value)} placeholder="Optional" className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all text-sm ${theme.input} ${theme.inputFocus}`} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>Pain point</label>
+                      <textarea value={formData.painPoint} onChange={(e) => handleInputChange('painPoint', e.target.value)} placeholder="Manual outreach taking too much time..." rows={2} className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all resize-none text-sm ${theme.input} ${theme.inputFocus}`} />
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-medium ${theme.textMuted} mb-2`}>Tone</label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {tones.map((tone) => (
+                          <button key={tone.id} onClick={() => handleInputChange('tone', tone.id)} className={`p-2.5 rounded-xl border transition-all ${formData.tone === tone.id ? (darkMode ? 'border-orange-500/50 bg-orange-500/10' : 'border-orange-500 bg-orange-50') : (darkMode ? 'border-white/5 hover:border-white/10' : 'border-slate-200 hover:border-slate-300')}`}>
+                            <span className="text-lg block">{tone.icon}</span>
+                            <span className={`text-[9px] ${theme.textMuted}`}>{tone.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-center">
+                  <button onClick={generateEmails} disabled={!isFormValid} className={`px-10 py-4 rounded-2xl font-bold text-lg transition-all flex items-center gap-3 ${isFormValid ? 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-xl shadow-orange-500/30 hover:shadow-orange-500/50 hover:scale-[1.02]' : (darkMode ? 'bg-white/5 text-white/30' : 'bg-slate-100 text-slate-400') + ' cursor-not-allowed'}`}>
+                    <span>⚡</span> Generate Emails
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 'generating' && (
+              <div className="flex flex-col items-center justify-center py-24 space-y-6">
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-2xl shadow-orange-500/40">
+                  <span className="text-3xl animate-bounce">⚡</span>
+                </div>
+                <div className="text-center">
+                  <h3 className="text-2xl font-bold">Crafting emails...</h3>
+                  <p className={`${theme.textMuted} mt-2`}>AI is personalizing your outreach</p>
+                </div>
+                <div className="flex gap-1.5">
+                  {[0,1,2].map(i => <div key={i} className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-bounce" style={{animationDelay: `${i*0.15}s`}}/>)}
+                </div>
+              </div>
+            )}
+
+            {step === 'results' && (
+              <div className="space-y-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-bold">Your Emails ✨</h2>
+                  <button onClick={() => { setStep('input'); setGeneratedEmails([]); }} className={`px-4 py-2 text-sm font-medium rounded-xl transition-all ${theme.buttonSecondary}`}>+ New</button>
+                </div>
+
+                <div className={`flex gap-1 p-1 rounded-xl ${darkMode ? 'bg-white/5' : 'bg-slate-100'}`}>
+                  {generatedEmails.map((email, idx) => (
+                    <button key={idx} onClick={() => setActiveEmail(idx)} className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeEmail === idx ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-lg' : theme.textMuted}`}>
+                      {email.style}
+                    </button>
+                  ))}
+                </div>
+
+                {generatedEmails[activeEmail] && (
+                  <div className={`border rounded-2xl overflow-hidden ${theme.card}`}>
+                    <div className={`px-5 py-4 border-b ${darkMode ? 'border-white/5' : 'border-slate-100'} flex items-center justify-between`}>
+                      <span className="font-semibold">{generatedEmails[activeEmail].style}</span>
+                      <button onClick={() => copyToClipboard(`Subject: ${generatedEmails[activeEmail].subject}\n\n${generatedEmails[activeEmail].body}`, activeEmail)} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${copied === activeEmail ? 'bg-green-500/20 text-green-500' : theme.buttonSecondary}`}>
+                        {copied === activeEmail ? '✓ Copied!' : '📋 Copy'}
+                      </button>
+                    </div>
+                    <div className="p-5 space-y-4">
+                      <div>
+                        <span className={`text-xs font-medium ${theme.textMuted} uppercase tracking-wider`}>Subject</span>
+                        <p className="font-semibold mt-1">{generatedEmails[activeEmail].subject}</p>
+                      </div>
+                      <div>
+                        <span className={`text-xs font-medium ${theme.textMuted} uppercase tracking-wider`}>Body</span>
+                        <div className={`mt-2 p-5 rounded-xl border ${darkMode ? 'bg-black/30 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                          <pre className={`${theme.textLight} whitespace-pre-wrap font-sans text-sm leading-relaxed`}>{generatedEmails[activeEmail].body}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* BULK SEND */}
+        {activeTab === 'bulk' && (
+          <div className="space-y-6">
+            <div className="text-center space-y-2">
+              <h2 className="text-3xl font-extrabold">Bulk <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-amber-500">Campaign</span></h2>
+              <p className={theme.textMuted}>Upload CSV → AI personalizes → Send to all</p>
+            </div>
+
+            <div className={`border rounded-2xl p-5 ${theme.card}`}>
+              <h3 className="font-semibold mb-4">Your Info</h3>
+              <div className="grid md:grid-cols-3 gap-4">
+                <div>
+                  <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>Name</label>
+                  <input type="text" value={formData.yourName} onChange={(e) => handleInputChange('yourName', e.target.value)} placeholder="John" className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all text-sm ${theme.input} ${theme.inputFocus}`} />
+                </div>
+                <div>
+                  <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>Company</label>
+                  <input type="text" value={formData.yourCompany} onChange={(e) => handleInputChange('yourCompany', e.target.value)} placeholder="Acme" className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all text-sm ${theme.input} ${theme.inputFocus}`} />
+                </div>
+                <div>
+                  <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>Product</label>
+                  <input type="text" value={formData.yourProduct} onChange={(e) => handleInputChange('yourProduct', e.target.value)} placeholder="AI Tool" className={`w-full px-4 py-3 border rounded-xl focus:outline-none transition-all text-sm ${theme.input} ${theme.inputFocus}`} />
+                </div>
+              </div>
+            </div>
+
+            {bulkStep === 'upload' && (
+              <div className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all ${darkMode ? 'border-white/10 hover:border-orange-500/50' : 'border-slate-200 hover:border-orange-500'}`}>
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center">
+                  <span className="text-3xl">📊</span>
+                </div>
+                <h3 className="text-lg font-bold mb-2">Upload CSV</h3>
+                <p className={`${theme.textMuted} text-sm mb-4`}>Columns: name, email, company, role</p>
+                <label className="inline-block px-6 py-3 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold rounded-xl cursor-pointer hover:from-orange-400 hover:to-amber-400 transition-all shadow-lg shadow-orange-500/25">
+                  Choose File
+                  <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+                </label>
+                
+                <div className={`mt-8 p-4 rounded-xl text-left ${darkMode ? 'bg-white/5' : 'bg-slate-50'}`}>
+                  <p className={`text-xs font-medium ${theme.textMuted} mb-2`}>Example:</p>
+                  <code className={`text-xs ${theme.textLight}`}>
+                    name,email,company,role<br/>
+                    John,john@acme.com,Acme,CTO<br/>
+                    Sarah,sarah@tech.io,TechCo,VP Sales
+                  </code>
+                </div>
+              </div>
+            )}
+
+            {bulkStep === 'preview' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold">{csvData.length} contacts</h3>
+                  <button onClick={() => { setCsvData([]); setBulkStep('upload'); }} className="text-sm text-red-500 hover:text-red-400">Clear</button>
+                </div>
+                
+                <div className={`border rounded-xl overflow-hidden ${theme.card}`}>
+                  <table className="w-full text-sm">
+                    <thead className={darkMode ? 'bg-white/5' : 'bg-slate-50'}>
+                      <tr>
+                        <th className="px-4 py-3 text-left font-semibold">Name</th>
+                        <th className="px-4 py-3 text-left font-semibold">Email</th>
+                        <th className="px-4 py-3 text-left font-semibold">Company</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvData.slice(0, 5).map((row, idx) => (
+                        <tr key={idx} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
+                          <td className="px-4 py-3 font-medium">{row.name}</td>
+                          <td className={`px-4 py-3 ${theme.textMuted}`}>{row.email}</td>
+                          <td className="px-4 py-3">{row.company}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {csvData.length > 5 && (
+                    <div className={`px-4 py-2 text-center text-sm font-medium ${theme.textMuted} ${darkMode ? 'bg-white/5' : 'bg-slate-50'}`}>
+                      +{csvData.length - 5} more
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  onClick={generateBulkEmails}
+                  disabled={!formData.yourName || !formData.yourCompany}
+                  className="w-full py-4 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold rounded-xl hover:from-orange-400 hover:to-amber-400 transition-all shadow-lg shadow-orange-500/25 disabled:opacity-50"
+                >
+                  ⚡ Generate {csvData.length} Emails
+                </button>
+              </div>
+            )}
+
+            {bulkStep === 'generating' && (
+              <div className="text-center py-16">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-xl shadow-orange-500/30">
+                  <span className="text-2xl animate-pulse">🤖</span>
+                </div>
+                <h3 className="text-lg font-bold mb-3">Generating...</h3>
+                <div className="w-64 mx-auto h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-orange-500 to-amber-500 transition-all" style={{width: `${sendingProgress}%`}}></div>
+                </div>
+                <p className={`${theme.textMuted} text-sm mt-2`}>{sendingProgress}%</p>
+              </div>
+            )}
+
+            {bulkStep === 'ready' && (
+              <div className="space-y-4">
+                <h3 className="font-bold">✅ {bulkEmails.length} emails ready</h3>
+                
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {bulkEmails.map((email, idx) => (
+                    <div key={idx} className={`border rounded-xl p-4 ${theme.card}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">{email.name}</span>
+                        <span className={`text-xs ${theme.textMuted}`}>{email.to}</span>
+                      </div>
+                      <p className={`text-sm ${theme.textMuted} mt-1`}>{email.subject}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <button onClick={sendAllEmails} className="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold rounded-xl hover:from-green-400 hover:to-emerald-400 transition-all shadow-lg">
+                  🚀 Send All
+                </button>
+              </div>
+            )}
+
+            {bulkStep === 'sending' && (
+              <div className="text-center py-16">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
+                  <span className="text-2xl">📤</span>
+                </div>
+                <h3 className="text-lg font-bold mb-3">Sending...</h3>
+                <div className="w-64 mx-auto h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all" style={{width: `${sendingProgress}%`}}></div>
+                </div>
+                <p className={`${theme.textMuted} text-sm mt-2`}>{sendingProgress}%</p>
+              </div>
+            )}
+
+            {bulkStep === 'done' && (
+              <div className="text-center py-16">
+                <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-xl shadow-green-500/30">
+                  <span className="text-5xl">✅</span>
+                </div>
+                <h3 className="text-2xl font-extrabold mb-2">Done!</h3>
+                <p className={`${theme.textMuted} mb-6`}>{bulkEmails.length} emails sent</p>
+                <button onClick={() => { setBulkStep('upload'); setCsvData([]); setBulkEmails([]); }} className={`px-6 py-3 rounded-xl font-semibold ${theme.buttonSecondary}`}>
+                  New Campaign
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Upgrade */}
+        <div className={`mt-12 border rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-4 ${darkMode ? 'bg-gradient-to-r from-orange-500/10 to-amber-500/10 border-orange-500/20' : 'bg-gradient-to-r from-orange-50 to-amber-50 border-orange-200'}`}>
+          <div>
+            <h3 className="font-bold text-lg">Go Unlimited 🚀</h3>
+            <p className={`${theme.textMuted} text-sm`}>CRM sync, analytics, scheduling</p>
+          </div>
+          <button className="px-6 py-3 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold rounded-xl shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 transition-all">
+            Upgrade — $49/mo
+          </button>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Bulky />);
+    </script>
+</body>
+</html>
